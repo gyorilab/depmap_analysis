@@ -654,7 +654,8 @@ def get_gene_gene_corr_dict(tuple_generator):
     corr_nest_dict = create_nested_dict()
     dnf_logger.info('Generating correlation lookup')
     for gene1, gene2, c in tuple_generator:
-        if gene1 == gene2:  # If self correlation were not filtered
+        # Self correlations should be filtered at this point but as a backup
+        if gene1 == gene2:
             continue
         else:
             corr = float(c)
@@ -1032,14 +1033,15 @@ def _get_corr_df(depmap_data, corr_matrix, geneset_file,
 
     assert corr_matrix_df is not None
 
-    # Filter correlations
-    if lower_limit > 0:
-        return corr_limit_filtering(corr_matrix_df, lower_limit, upper_limit)
     # No filtering
-    else:
+    if lower_limit == 0 and upper_limit == 1.0:
         dnf_logger.warning('No filtering requested. Be aware of large RAM '
                           'usage.')
         return corr_matrix_df, hgnc_sym2id, hgnc_id2sym
+    # Filter correlations
+    else:
+        return corr_limit_filtering(corr_matrix_df, lower_limit, upper_limit),\
+               hgnc_sym2id, hgnc_id2sym
 
 
 def corr_limit_filtering(corr_matrix_df, lower_limit, upper_limit):
