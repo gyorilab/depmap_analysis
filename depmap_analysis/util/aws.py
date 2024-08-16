@@ -5,6 +5,7 @@ import logging
 from typing import Union, Tuple, Any, Dict, Optional
 from operator import itemgetter
 
+from indra.config import get_config
 from indra.util.aws import get_s3_file_tree, get_s3_client
 from indra_db.cli.dump import Sif, StatementHashMeshId
 
@@ -12,9 +13,9 @@ dumpers = [Sif]
 
 logger = logging.getLogger(__name__)
 
-DUMPS_BUCKET = 'bigmech'
+DUMPS_BUCKET = get_config("DUMPS_BUCKET") or 'bigmech'
 DUMPS_PREFIX = 'indra-db/dumps/'
-NET_BUCKET = 'depmap-analysis'
+NET_BUCKET = get_config("NET_BUCKET") or 'depmap-analysis'
 NETS_PREFIX = 'graphs/'
 
 
