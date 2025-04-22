@@ -32,6 +32,7 @@ def get_logp(
     data_corr :
         A dataframe with correlation values
     filepath :
+        An h5 file path to save or read the logp values from.
         If `recalculate==False`: read the logp values from this file, if it exists.
         If `recalculate==True`: write the logp values to this file.
         If not provided, run the calculation and return the logp values
@@ -49,8 +50,11 @@ def get_logp(
     if method not in ('t', 'beta'):
         raise ValueError('Method must be "t" or "beta"')
     start = time()
-    filepath = str(Path(filepath).resolve()) if filepath is not None else None
-    if recalculate or filepath is None or not Path(filepath).exists():
+    if filepath is not None:
+        if not Path(filepath).name.endswith('.h5'):
+            filepath = Path(filepath).with_suffix('.h5')
+        filepath = Path(filepath).resolve()
+    if recalculate or filepath is None or not filepath.exists():
         # T-statistic method
         # See https://stackoverflow.com/a/24469099
         # See https://support.minitab.com/en-us/minitab-express/1/help-and-how-to/basic-statistics/inference/supporting-topics/basics/manually-calculate-a-p-value/
@@ -69,11 +73,11 @@ def get_logp(
         data_logp = pd.DataFrame(logp, columns=data_corr.columns,
                                  index=data_corr.index)
         if filepath is not None:
-            logger.info(f'Saving logp dataframe to {"%s.h5" % filepath}')
-            data_logp.to_hdf('%s.h5' % filepath, filepath.split('/')[-1])
+            logger.info(f"Saving logp dataframe to {filepath}")
+            data_logp.to_hdf(str(filepath), filepath.name.split('.')[0])
     else:
-        logger.info(f'Reading logp dataframe from file: {filepath}')
-        data_logp = pd.read_hdf('%s.h5' % filepath)
+        logger.info(f"Reading logp dataframe from file: {filepath}")
+        data_logp = pd.read_hdf(str(filepath))
     elapsed = time() - start
     logger.info(f'Elapsed time getting logp values: {elapsed} sec')
     return data_logp
@@ -96,6 +100,7 @@ def get_z(
     data_corr :
         The correlation matrix of entity-entity correlations.
     filepath :
+        An h5 file path to save or read the z-scores from.
         If `recalculate==False`: read the z-score values from this file, if it exists.
         If `recalculate==True`: write the z-score values to this file.
         If not provided, run the calculation and return the z-score dataframe
@@ -107,7 +112,10 @@ def get_z(
         A dataframe with the z-scores
     """
     start = time()
-    filepath = str(Path(filepath).resolve()) if filepath is not None else None
+    if filepath is not None:
+        if not Path(filepath).name.endswith('.h5'):
+            filepath = Path(filepath).with_suffix('.h5')
+        filepath = Path(filepath).resolve()
     if recalculate or filepath is None or not Path(filepath).exists():
         # z_mat = stats.norm.ppf(1 - np.exp(data_logp) / 2)
         # z_mat = -norminv_logcdf(data_logp - np.log(2))
@@ -118,11 +126,11 @@ def get_z(
         data_z = data_sign * pd.DataFrame(z_mat, index=data_logp.columns,
                                           columns=data_logp.columns)
         if filepath is not None:
-            logger.info(f'Saving z score dataframe to {"%s.h5" % filepath}')
-            data_z.to_hdf('%s.h5' % filepath, filepath.split('/')[-1])
+            logger.info(f"Saving z score dataframe to {filepath}")
+            data_z.to_hdf(str(filepath), filepath.name.split('.')[0])
     else:
         logger.info(f'Reading z-score dataframe from {filepath}')
-        data_z = pd.read_hdf('%s.h5' % filepath)
+        data_z = pd.read_hdf(str(filepath))
     elapsed = time() - start
     logger.info(f'Elapsed time getting z-scores: {elapsed} sec')
     return data_z
@@ -142,6 +150,7 @@ def get_n(
     data_df :
         Original raw data as a dataframe
     filepath :
+        An h5 file path to save or read the sample sizes from.
         If `recalculate==False`: read the correlation values from this file, if it exists.
         If `recalculate==True`: write the correlation values to this file.
         If not provided, run the calculation and return the correlation data
@@ -153,7 +162,10 @@ def get_n(
         A dataframe holding the sample sizes
     """
     start = time()
-    filepath = str(Path(filepath).resolve()) if filepath is not None else None
+    if filepath is not None:
+        if not Path(filepath).name.endswith('.h5'):
+            filepath = Path(filepath).with_suffix('.h5')
+        filepath = Path(filepath).resolve()
     if recalculate or filepath is None or not Path(filepath).exists():
         logger.info('Calculating sampling values')
         data_mat = data_df.copy()
@@ -161,11 +173,11 @@ def get_n(
         data_mat[pd.isna(data_mat)] = 0
         data_n = data_mat.transpose().dot(data_mat)
         if filepath is not None:
-            logger.info(f'Saving sampling matrix to {"%s.h5" % filepath}')
-            data_n.to_hdf('%s.h5' % filepath, filepath.split('/')[-1])
+            logger.info(f"Saving sampling matrix to {filepath}")
+            data_n.to_hdf(str(filepath), filepath.name.split('.')[0])
     else:
-        logger.info(f'Reading sampling values from file {filepath}')
-        data_n = pd.read_hdf('%s.h5' % filepath)
+        logger.info(f"Reading sampling values from file {filepath}")
+        data_n = pd.read_hdf(str(filepath))
     elapsed = time() - start
     logger.info(f'Elapsed time getting sampling: {elapsed} sec')
     return data_n
