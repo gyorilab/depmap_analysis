@@ -16,8 +16,8 @@ __all__ = ['get_z', 'get_logp', 'get_n']
 
 def get_logp(
     recalculate: bool,
-    data_n: pd.DataFrame,
-    data_corr: pd.DataFrame,
+    data_n: Optional[pd.DataFrame] = None,
+    data_corr: Optional[pd.DataFrame] = None,
     filepath: Optional[str] = None,
     method: Literal['beta', 't'] = 'beta'
 ) -> pd.DataFrame:
@@ -47,6 +47,10 @@ def get_logp(
         The logp values calculated using the provided method or read from
         the filepath provided.
     """
+    if (data_n is None or data_corr is None) and (recalculate or filepath is None):
+        raise ValueError(
+            "Must provide data_n and data_corr if recalculate is True or filepath is None"
+        )
     if method not in ('t', 'beta'):
         raise ValueError('Method must be "t" or "beta"')
     start = time()
@@ -85,8 +89,8 @@ def get_logp(
 
 def get_z(
     recalculate: bool,
-    data_logp: pd.DataFrame,
-    data_corr: pd.DataFrame,
+    data_logp: Optional[pd.DataFrame] = None,
+    data_corr: Optional[pd.DataFrame] = None,
     filepath: Optional[str] = None
 ) -> pd.DataFrame:
     """Get the z-score based on p-values of the correlation matrix
@@ -111,6 +115,10 @@ def get_z(
     :
         A dataframe with the z-scores
     """
+    if (data_logp is None or data_corr is None) and (recalculate or filepath is None):
+        raise ValueError(
+            "Must provide data_logp and data_corr if recalculate is True or filepath is None"
+        )
     start = time()
     if filepath is not None:
         if not Path(filepath).name.endswith('.h5'):
@@ -138,7 +146,7 @@ def get_z(
 
 def get_n(
     recalculate: bool,
-    data_df: pd.DataFrame,
+    data_df: Optional[pd.DataFrame] = None,
     filepath: Optional[str] = None
 ) -> pd.DataFrame:
     """Get sample sizes
@@ -161,6 +169,10 @@ def get_n(
     :
         A dataframe holding the sample sizes
     """
+    if data_df is None and (recalculate or filepath is None):
+        raise ValueError(
+            "Must provide data_df if recalculate is True or filepath is None"
+        )
     start = time()
     if filepath is not None:
         if not Path(filepath).name.endswith('.h5'):
