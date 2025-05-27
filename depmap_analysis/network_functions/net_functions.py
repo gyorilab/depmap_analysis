@@ -359,9 +359,12 @@ def sif_dump_df_merger(df: pd.DataFrame,
     return merged_df
 
 
-def add_corr_to_edges(graph: DiGraph, z_corr: pd.DataFrame,
-                      self_corr_value: Optional[float] = None):
-    """Add z-score and associated weight to graph edges
+def add_corr_to_edges(
+    graph: DiGraph,
+    z_corr: pd.DataFrame,
+    self_corr_value: Optional[float] = None
+):
+    """Add z-scores to graph edges
 
     Parameters
     ----------
@@ -373,7 +376,7 @@ def add_corr_to_edges(graph: DiGraph, z_corr: pd.DataFrame,
         If provided, set this value as self corr value. Default: value of
         first non-NaN value on the diagonal.
     """
-    logger.info('Setting z-scores and z-score weights to graph edges')
+    logger.info('Adding z-scores to graph edges')
     self_corr = None
     if self_corr_value is not None:
         self_corr = self_corr_value
@@ -386,19 +389,14 @@ def add_corr_to_edges(graph: DiGraph, z_corr: pd.DataFrame,
         raise ValueError('Provide a value for self correlation or a z-score '
                          'dataframe with self correlations')
     non_z_score = 0
-    non_corr_weight = round(
-        z_sc_weight(z_score=non_z_score, self_corr=self_corr), 4
-    )
     for u, v, data in tqdm(graph.edges(data=True)):
         un = u[0] if isinstance(u, tuple) else u
         vn = v[0] if isinstance(v, tuple) else v
         if un in z_corr and vn in z_corr and not np.isnan(z_corr.loc[un, vn]):
             z_sc = z_corr.loc[un, vn]
             data['z_score'] = round(z_sc, 4)
-            data['corr_weight'] = round(z_sc_weight(z_sc, self_corr), 4)
         else:
             data['z_score'] = non_z_score
-            data['corr_weight'] = non_corr_weight
 
     logger.info('Performing sanity checks')
     assert all('corr_weight' in graph.edges[e] and 'z_score' in graph.edges[e]
@@ -466,6 +464,34 @@ def z_sc_weight_df(df: pd.DataFrame, self_corr: float) -> pd.Series:
     return out_series
 
 
+def logp_weight(logp: float, scale: float, sigfig: int = 4) -> float:
+    """Calculate the corresponding weight of a given logp value
+
+    The weight is calculated as:
+    (scale - 0.9 * abs(logp)) / scale
+
+    Setting scale to max(abs(logp)) will result in a weight of 1 for
+    logp == 0, and a weight of 0.1 for logp == scale.
+
+    Parameters
+    ----------
+    logp :
+        The logp to calculate the weight of
+    scale :
+        A float to scale the logp value with.
+    sigfig :
+        The number of decimal places to round the weight to. Default: 4.
+
+    Returns
+    -------
+    :
+        A weight value calculated as
+    """
+    if pd.isna(logp) or np.isinf(logp):
+        return 1.0
+    return round((scale - 0.9 * abs(logp)) / scale, sigfig)
+
+
 def z_sc_weight(z_score: float, self_corr: float) -> float:
     """Calculate the corresponding weight of a given z-score
 
@@ -484,8 +510,8 @@ def z_sc_weight(z_score: float, self_corr: float) -> float:
         The difference between self_corr and the absolute value of the
         z-score normalized, unless z_score == self_corr, then return 1
     """
-    if self_corr == z_score:
-        return 1
+    if pd.isna(z_score) or np.isinf(z_score) or self_corr == z_score:
+        return 1.0
     return (self_corr - abs(z_score)) / self_corr
 
 
