@@ -95,6 +95,10 @@ def get_z(
 ) -> pd.DataFrame:
     """Get the z-score based on p-values of the correlation matrix
 
+    The function `f` in the Indra Network Search documentation
+    https://indra-network-search.readthedocs.io/en/latest/ui_introduction.html#depmap-z-score-weighted
+    is ndtri_exp used here.
+
     Parameters
     ----------
     recalculate :
