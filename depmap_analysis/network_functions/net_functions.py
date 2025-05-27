@@ -516,6 +516,7 @@ def sif_dump_df_to_digraph(
     include_entity_hierarchies: bool = True,
     sign_dict: Optional[Dict[str, int]] = None,
     stmt_types: Optional[List[str]] = None,
+    mesh_id_dict: Optional[Dict[str, str]] = None,
     z_sc_path: Optional[Union[str, pd.DataFrame]] = None,
     corr_weight_type: Literal['z_score', 'logp'] = 'logp',
     verbosity: int = 0
@@ -553,6 +554,9 @@ def sif_dump_df_to_digraph(
         dictionary.
     stmt_types :
         A list of statement types to epxand out to other signs
+    mesh_id_dict :
+        A dict object mapping statement hashes to all mesh ids sharing a
+        common PMID. If None, no mesh ids are added.
     z_sc_path :
         If provided, must be or be path to a square dataframe with HGNC symbols
         as names on the axes and floats as entries
@@ -651,8 +655,14 @@ def sif_dump_df_to_digraph(
     if graph_type == 'digraph-signed-types':
         sif_df = sif_df[sif_df.stmt_type.isin(sign_dict.keys())]
 
-    sif_df = sif_dump_df_merger(sif_df, graph_type, sign_dict, stmt_types,
-                                mesh_id_dict, verbosity=verbosity)
+    sif_df = sif_dump_df_merger(
+        sif_df,
+        graph_type,
+        sign_dict,
+        stmt_types,
+        mesh_id_dict=mesh_id_dict,
+        verbosity=verbosity
+    )
 
     # Map ns:id to node name
     logger.info('Creating dictionary mapping (ns,id) to node name')
