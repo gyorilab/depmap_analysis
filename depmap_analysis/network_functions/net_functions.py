@@ -245,7 +245,7 @@ def sif_dump_df_merger(df: pd.DataFrame,
                        sign_dict: Optional[Dict[str, int]] = None,
                        stmt_types: Optional[List[str]] = None,
                        mesh_id_dict: Optional[Dict[str, str]] = None,
-                       set_weights: bool = True,
+                       set_belief_weight: bool = True,
                        verbosity: int = 0):
     """Merge the sif dump df with the provided dictionaries
 
@@ -270,7 +270,7 @@ def sif_dump_df_merger(df: pd.DataFrame,
     mesh_id_dict : dict
         A dict object mapping statement hashes to all mesh ids sharing a
         common PMID
-    set_weights : bool
+    set_belief_weight : bool
         If True, set the edge weights. Default: True.
     verbosity : int
         Output various extra messages if > 1.
@@ -334,8 +334,8 @@ def sif_dump_df_merger(df: pd.DataFrame,
     # Make english statement
     merged_df['english'] = merged_df.apply(_english_from_row, axis=1)
 
-    if set_weights:
-        logger.info('Setting edge weights')
+    if set_belief_weight:
+        logger.info('Setting edge belief weights')
         # Add weight: -log(belief) or 1/evidence count if no belief
         has_belief = (merged_df['belief'].isna() == False)
         has_no_belief = (merged_df['belief'].isna() == True)
