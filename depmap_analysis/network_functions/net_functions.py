@@ -340,6 +340,7 @@ def sif_dump_df_merger(df: pd.DataFrame,
         has_belief = (merged_df['belief'].isna() == False)
         has_no_belief = (merged_df['belief'].isna() == True)
         merged_df['weight'] = 0
+        merged_df['weight'] = merged_df['weight'].astype(np.longfloat)
         if has_belief.sum() > 0:
             merged_df.loc[has_belief, 'weight'] = merged_df['belief'].apply(
                 func=_weight_from_belief)
