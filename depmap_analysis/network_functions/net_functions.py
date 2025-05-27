@@ -746,9 +746,19 @@ def sif_dump_df_to_digraph(
                     non_corr_weight = indranet_graph.edges[edge]['corr_weight']
                     break
             assert non_corr_weight is not None
-            z_sc_attrs = {'z_score': 0, 'corr_weight': non_corr_weight}
+            z_sc_attrs = {'z_score': 0, 'corr_weight': non_corr_weight, "logp": 0}
         else:
             z_sc_attrs = {}
+
+        # Edge dict
+        default_edge_dict = {
+            "stmt_type": "fplx",
+            "evidence_count": 1,
+            "source_counts": {"fplx": 1},
+            "belief": 1.0,
+            "weight": MIN_WEIGHT,
+            "curated": True,
+        }
 
         for ns, _id, uri in full_entity_list:
             node = _id
@@ -771,15 +781,17 @@ def sif_dump_df_to_digraph(
                     entities += 1
                     # Belief and evidence are conditional
                     added_pairs.add((node, pnode, puri))  # A, B, uri of B
-                    ed = {'agA_name': node, 'agA_ns': ns, 'agA_id': _id,
-                          'agB_name': pnode, 'agB_ns': pns, 'agB_id': pid,
-                          'stmt_type': 'fplx', 'evidence_count': 1,
-                          'source_counts': {'fplx': 1}, 'stmt_hash': puri,
-                          'belief': 1.0, 'weight': MIN_WEIGHT,
-                          'curated': True,
-                          'english': f'{pns}:{pid} is an ontological parent '
-                                     f'of {ns}:{_id}',
-                          'z_score': 0, 'corr_weight': 1}
+                    ed = {
+                        **default_edge_dict,
+                        "agA_name": node,
+                        "agA_ns": ns,
+                        "agA_id": _id,
+                        "agB_name": pnode,
+                        "agB_ns": pns,
+                        "agB_id": pid,
+                        "stmt_hash": puri,
+                        "english": f"{pns}:{pid} is an ontological parent of {ns}:{_id}",
+                    }
                     # Add non-existing nodes
                     if ed['agA_name'] not in indranet_graph.nodes:
                         indranet_graph.add_node(ed['agA_name'],
