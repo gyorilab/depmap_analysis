@@ -4,14 +4,8 @@ from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from itertools import cycle
-from typing import Tuple, Union, Dict, Optional, List
-
-try:
-    # Py 3.8+
-    from typing import Literal
-except ImportError:
-    # Py 3.7-
-    from typing_extensions import Literal
+from typing import Tuple, Union, Dict, Optional, List, Literal
+from scipy.special import ndtri_exp
 
 import numpy as np
 import pandas as pd
@@ -515,24 +509,25 @@ def z_sc_weight(z_score: float, self_corr: float) -> float:
     return (self_corr - abs(z_score)) / self_corr
 
 
-def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
-                           date: str,
-                           mesh_id_dict: Optional[Dict] = None,
-                           graph_type: GraphTypes = 'digraph',
-                           include_entity_hierarchies: bool = True,
-                           sign_dict: Optional[Dict[str, int]] = None,
-                           stmt_types: Optional[List[str]] = None,
-                           z_sc_path: Optional[Union[str, pd.DataFrame]] = None,
-                           verbosity: int = 0) \
-        -> Union[DiGraph, MultiDiGraph, Tuple[MultiDiGraph, DiGraph]]:
+def sif_dump_df_to_digraph(
+    df: Union[pd.DataFrame, str],
+    date: str,
+    graph_type: GraphTypes = 'digraph',
+    include_entity_hierarchies: bool = True,
+    sign_dict: Optional[Dict[str, int]] = None,
+    stmt_types: Optional[List[str]] = None,
+    z_sc_path: Optional[Union[str, pd.DataFrame]] = None,
+    corr_weight_type: Literal['z_score', 'logp'] = 'logp',
+    verbosity: int = 0
+) -> Union[DiGraph, MultiDiGraph, Tuple[MultiDiGraph, DiGraph]]:
     """Return a NetworkX digraph from a pandas dataframe of a db dump
 
     Parameters
     ----------
-    df : Union[str, pd.DataFrame]
+    df :
         A dataframe, either as a file path to a file (.pkl or .csv) or a
         pandas DataFrame object.
-    date : str
+    date :
         A date string specifying when the data was dumped from the database.
     mesh_id_dict : dict
         A dict object mapping statement hashes to all mesh ids sharing a
@@ -543,31 +538,33 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
             - 'multidigraph': MultiDiGraph
             - 'signed': Tuple[DiGraph, MultiDiGraph]
             - 'signed-expanded': Tuple[DiGraph, MultiDiGraph]
-            - 'digraph-signed-types':  DiGraph
+            - 'digraph-signed-types': DiGraph
     include_entity_hierarchies : bool
         If True, add edges between nodes if they are related ontologically
         with stmt type 'fplx': e.g. BRCA1 is in the BRCA family, so an edge
         is added between the nodes BRCA and BRCA1. Default: True. Note that
         this option only is available for the options directed/unsigned graph
         and multidigraph.
-    sign_dict : Dict[str, int]
+    sign_dict :
         A dictionary mapping a Statement type to a sign to be used for the
         edge. By default only Activation and IncreaseAmount are added as
         positive edges and Inhibition and DecreaseAmount are added as
         negative edges, but a user can pass any other Statement types in a
         dictionary.
-    stmt_types : List[str]
+    stmt_types :
         A list of statement types to epxand out to other signs
-    z_sc_path:
+    z_sc_path :
         If provided, must be or be path to a square dataframe with HGNC symbols
         as names on the axes and floats as entries
-    verbosity: int
+    corr_weight_type :
+        The type of weight to use for the edges. If 'z_score', use the
+    verbosity :
         Output various messages if > 0. For all messages, set to 4.
 
     Returns
     -------
-    Union[DiGraph, MultiDiGraph, Tuple[DiGraph, MultiDiGraph]]
-        The type is determined by the graph_type argument
+    :
+        A networkx graph of The graph type is determined by the graph_type argument
     """
     graph_options = ('digraph', 'multidigraph', 'signed', 'signed-expanded',
                      'digraph-signed-types')
@@ -588,7 +585,7 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
         if isinstance(z_sc_path, str):
             if z_sc_path.endswith('h5'):
                 logger.info(f'Loading z-scores from {z_sc_path}')
-                z_sc_df = pd.read_hdf(z_sc_path)
+                z_sc_df: pd.DataFrame = pd.read_hdf(z_sc_path)
             elif z_sc_path.endswith('pkl'):
                 logger.info(f'Loading z-scores from {z_sc_path}')
                 z_sc_df: pd.DataFrame = file_opener(z_sc_path)
@@ -601,6 +598,54 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
                              'arguments to z_sc_path')
     else:
         z_sc_df = None
+
+    # Set z-scores and corr_weights
+
+    # Calculate z-scores from logp values if the sign is available
+    if z_sc_df is None and 'logp' in sif_df.columns and "sign" in sif_df.columns:
+        logger.info('Calculating z-scores from logp values')
+
+        # Set z-score and corr_weight attributes
+        def _logp_z_sc(row) -> float:
+            if row["logp"] is None or np.isnan(row["logp"]):
+                return 0.0
+            return abs(ndtri_exp(row["logp"] - np.log(2))) * row["sign"]
+        sif_df["z_score"] = sif_df.apply(_logp_z_sc, axis=1)
+
+    # Otherwise, if z_sc_df is provided, set the z_score and corr_weight
+    elif z_sc_df is not None:
+        logger.info('Setting z-scores from provided z-score dataframe')
+        # Get correlations
+        z_corr_pairs = get_corrs(z_sc_df, sif_df)
+        # Add to sif_df, set the missing values to 0
+        sif_df = sif_df.merge(z_corr_pairs, how='left',
+                              on=['agA_name', 'agB_name'])
+        sif_df['z_score'] = sif_df['z_score'].fillna(0.0)
+    else:
+        logger.info('No way to calculate z-scores, log-p values and signs are missing '
+                    'or z-score dataframe not provided.')
+
+    # Set corr_weight based on z_score or logp
+    if corr_weight_type == "z_score" and "z_score" in sif_df.columns:
+        logger.info('Setting corr_weight based on z_score')
+        if z_sc_df is not None:
+            self_corr = z_sc_df.iloc[0, 0]
+            if pd.isna(self_corr) or np.isinf(self_corr):
+                self_corr = z_sc_df.max().max() * 1.1
+        else:
+            self_corr = sif_df["z_score"].abs().max() * 1.1
+        sif_df["corr_weight"] = sif_df["z_score"].apply(z_sc_weight, self_corr=self_corr)
+
+    elif corr_weight_type == "logp" and "logp" in sif_df.columns:
+        logger.info('Setting corr_weight based on logp values')
+        scale = sif_df[sif_df["logp"] > -np.inf]["logp"].abs().max()
+        sif_df["corr_weight"] = sif_df["logp"].apply(logp_weight, scale=scale)
+
+    else:
+        logger.warning(
+            "Need to have either z_score or logp values in the dataframe to set "
+            "corr_weight. Skipping setting corr_weight."
+        )
 
     # If signed types: filter out rows that of unsigned types
     if graph_type == 'digraph-signed-types':
@@ -666,19 +711,10 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
                 else:
                     sng_hash_edge_dict[es['stmt_hash']].add(edge)
         signed_node_graph.graph['edge_by_hash'] = sng_hash_edge_dict
-        if z_sc_df is not None:
-            # Set z-score attributes
-            add_corr_to_edges(graph=signed_edge_graph, z_corr=z_sc_df)
-            add_corr_to_edges(graph=signed_node_graph, z_corr=z_sc_df)
-
         return signed_edge_graph, signed_node_graph
     else:
         raise ValueError(f'Unrecognized graph type {graph_type}. Must be one '
                          f'of: {", ".join(graph_options)}')
-
-    if z_sc_df is not None:
-        # Set z-score attributes
-        add_corr_to_edges(graph=indranet_graph, z_corr=z_sc_df)
 
     # Add hierarchy relations to graph (not applicable for signed graphs)
     if include_entity_hierarchies and graph_type in ('multidigraph',
