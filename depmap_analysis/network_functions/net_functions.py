@@ -522,7 +522,7 @@ def sif_dump_df_to_digraph(
     corr_weight_type: Literal['z_score', 'logp'] = 'logp',
     verbosity: int = 0
 ) -> Union[DiGraph, MultiDiGraph, Tuple[MultiDiGraph, DiGraph]]:
-    """Return a NetworkX digraph from a pandas dataframe of a db dump
+    """Return a NetworkX digraph from a pandas dataframe of a db dump as a sif df
 
     Parameters
     ----------
