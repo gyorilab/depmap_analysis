@@ -512,7 +512,7 @@ def z_sc_weight(z_score: float, self_corr: float) -> float:
 
 def sif_dump_df_to_digraph(
     df: Union[pd.DataFrame, str],
-    date: str,
+    date: str = None,
     graph_type: GraphTypes = 'digraph',
     include_entity_hierarchies: bool = True,
     sign_dict: Optional[Dict[str, int]] = None,
