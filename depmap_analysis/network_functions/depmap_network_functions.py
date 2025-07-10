@@ -7,8 +7,8 @@ import itertools as itt
 from random import choices
 from math import ceil, log10
 from typing import Iterable, Optional, List, Union
-from collections import Mapping, OrderedDict, defaultdict
-
+from collections import OrderedDict, defaultdict
+from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -2192,7 +2192,7 @@ def get_pairs(corr_z: pd.DataFrame,
         return int(bm.sum().sum())
     else:
         # Mask lower triangle and diagonal with zeroes
-        ma = bm.mask(np.tril(np.ones(bm.shape).astype(bool)), other=0)
+        ma = bm.mask(np.tril(np.ones(bm.shape).astype(bool)), other=0).astype(float)
 
         # Return sum over full matrix
         return int(ma.sum().sum())
@@ -2246,7 +2246,16 @@ def down_sample_df(z_corr: pd.DataFrame, sample_size: int,
         z_corr = z_corr.filter(list(z_corr.index), axis=1)
 
         # Update n_pairs and row_samples
-        n_pairs = get_pairs(corr_z=z_corr, subset_list=subset_list)
+        # Estimated_pairs is half of the rectangle exclusing diagonal
+        estimated_pairs = (row_samples * (row_samples - 1)) // 2
+        if estimated_pairs <= int(1.1 * sample_size):
+            # Get the real number of the pairs
+            n_pairs = get_pairs(corr_z=z_corr, subset_list=subset_list)
+            if n_pairs <= int(1.1 * sample_size):
+                break
+        else:
+            n_pairs = estimated_pairs
+
         mm = max(row_samples - int(np.ceil(0.05 * row_samples))
                  if n_pairs - sample_size < np.ceil(0.1 * sample_size)
                  else down_sampl_size(n_pairs, len(z_corr), sample_size),
