@@ -627,15 +627,20 @@ def sif_dump_df_to_digraph(
                               on=['agA_name', 'agB_name'])
         sif_df['z_score'] = sif_df['z_score'].fillna(0.0)
     else:
-        logger.info('No way to calculate z-scores, log-p values and signs are missing '
-                    'or z-score dataframe not provided.')
+        logger.info("No way to get z-score values: log-p values and signs are "
+                    "missing from sif dataframe or z-score dataframe not "
+                    "provided.")
 
     # Set corr_weight based on z_score or logp
     if corr_weight_type == "z_score" and "z_score" in sif_df.columns:
-        logger.info('Setting corr_weight based on z_score')
+        logger.info("Setting corr_weight based on z_score")
         if z_sc_df is not None:
             self_corr = z_sc_df.iloc[0, 0]
             if pd.isna(self_corr) or np.isinf(self_corr):
+                logger.warning(
+                    "Self correlation value is NaN or inf in z-score dataframe. "
+                    "Using max(abs(z-score)) value instead to scale corr_weight."
+                )
                 self_corr = z_sc_df.max().max() * 1.1
         else:
             self_corr = sif_df["z_score"].abs().max() * 1.1
