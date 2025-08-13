@@ -7,9 +7,7 @@ from operator import itemgetter
 
 from indra.config import get_config
 from indra.util.aws import get_s3_file_tree, get_s3_client
-from indra_db.cli.dump import Sif, StatementHashMeshId
 
-dumpers = [Sif]
 
 logger = logging.getLogger(__name__)
 
@@ -17,24 +15,29 @@ DUMPS_BUCKET = get_config("DUMPS_BUCKET") or 'bigmech'
 DUMPS_PREFIX = 'indra-db/dumps/'
 NET_BUCKET = get_config("NET_BUCKET") or 'depmap-analysis'
 NETS_PREFIX = 'graphs/'
+NETS_SOURCE_DATA_PREFIX_SUBDIR = "source_data"
+SIF_PKL_NAME = "sif.pkl"
+STMT_HASH_MESH_PKL_NAME = "statement_hash_mesh_id.pkl"
 
 
-def get_latest_sif_s3(get_mesh_ids: bool = False) \
-        -> Union[Tuple[Any, str], Tuple[Tuple[Any, str], Tuple[Any, str]]]:
-    necc_files = [mngr.name for mngr in dumpers]
+def get_latest_sif_s3(
+    get_mesh_ids: bool = False
+) -> Union[Tuple[Any, str], Tuple[Tuple[Any, str], Tuple[Any, str]]]:
+    necc_files = [SIF_PKL_NAME]
     if get_mesh_ids:
-        necc_files.append(StatementHashMeshId.name)
+        necc_files.append(STMT_HASH_MESH_PKL_NAME)
     s3 = get_s3_client(unsigned=False)
-    tree = get_s3_file_tree(s3, bucket=DUMPS_BUCKET, prefix=DUMPS_PREFIX,
-                            with_dt=True)
-    # Find all pickles and jsons
-    keys = [key for key in tree.gets('key') if key[0].endswith(
-        ('.pkl', '.json'))]
+    tree = get_s3_file_tree(
+        s3, bucket=NET_BUCKET, prefix=NETS_PREFIX, with_dt=True
+    )
+    # Find all pickles
+    keys = [key for key in tree.gets('key') if key[0].endswith('.pkl')]
     # Sort newest first
     keys.sort(key=lambda t: t[1], reverse=True)
     # Get keys of those pickles
-    keys_in_latest_dir = \
-        [k[0] for k in keys if any(nfl in k[0] for nfl in necc_files)]
+    keys_in_latest_dir = [
+        k[0] for k in keys if any(nfl in k[0] for nfl in necc_files)
+    ]
     # Map key to resource
     necc_keys = {}
     for n in necc_files:
@@ -45,29 +48,31 @@ def get_latest_sif_s3(get_mesh_ids: bool = False) \
                 necc_keys[n] = k
                 break
     logger.info(f'Latest files: {", ".join([f for f in necc_keys.values()])}')
-    df = load_pickle_from_s3(s3, key=necc_keys[Sif.name], bucket=DUMPS_BUCKET)
-    sif_date = _get_date_from_s3_key(necc_keys[Sif.name])
+    sif_key = necc_keys[SIF_PKL_NAME]
+    df = load_pickle_from_s3(s3, key=sif_key, bucket=NET_BUCKET)
+    sif_date = _get_date_from_s3_key(sif_key)
     if get_mesh_ids:
-        mid = load_pickle_from_s3(s3,
-                                  key=necc_keys[StatementHashMeshId.name],
-                                  bucket=DUMPS_BUCKET)
-        meshids_date = _get_date_from_s3_key(
-            necc_keys[StatementHashMeshId.name])
+        hash_mesh_key = necc_keys[STMT_HASH_MESH_PKL_NAME]
+        mid = load_pickle_from_s3(s3, key=hash_mesh_key, bucket=NET_BUCKET)
+        meshids_date = _get_date_from_s3_key(hash_mesh_key)
         return (df, sif_date), (mid, meshids_date)
 
     return df, sif_date
 
 
 def _get_date_from_s3_key(s3key: str) -> str:
-    # Checks if truly an s3 path
-    patt = re.compile('indra-db/dumps/([0-9\-]+)/(.*)')
+    # Checks if path is in the expected format
+    # Example: "graphs/2023-10-01/source_data/sif.pkl"
+    patt = re.compile(
+        NETS_PREFIX + "([0-9\-]+)/"+ NETS_SOURCE_DATA_PREFIX_SUBDIR + "/(.*)"
+    )
     m = patt.match(s3key)
     if m is None:
         raise ValueError(f'Invalid format for s3 path: {s3key}')
 
-    # Split and get second to last directory
+    # Split and get date from path
     date_str, fname = m.groups()
-    logger.info(f'Got date {date_str} for {fname}')
+    logger.info(f"Got date {date_str} for {fname} from s3 key {s3key}")
     return date_str
 
 
