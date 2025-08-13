@@ -32,8 +32,14 @@ from indra.statements import Agent, get_statement_by_name, get_all_descendants
 
 logger = logging.getLogger(__name__)
 
-NP_PRECISION = 10 ** -np.finfo(np.longfloat).precision  # Numpy precision
-MIN_WEIGHT = np.longfloat(1e-12)  # Set min weight to 10x precision
+try:
+    # numpy < 2
+    long_float = np.longfloat
+except AttributeError:
+    # numpy >= 2
+    long_float = np.longdouble
+NP_PRECISION = 10 ** -np.finfo(long_float).precision  # Numpy precision
+MIN_WEIGHT = long_float(1e-12)  # Set min weight to 10x precision
 INT_PLUS = 0
 INT_MINUS = 1
 SIGN_TO_STANDARD = {INT_PLUS: '+', '+': '+', 'plus': '+',
@@ -340,14 +346,14 @@ def sif_dump_df_merger(df: pd.DataFrame,
         has_belief = (merged_df['belief'].isna() == False)
         has_no_belief = (merged_df['belief'].isna() == True)
         merged_df['weight'] = 0
-        merged_df['weight'] = merged_df['weight'].astype(np.longfloat)
+        merged_df['weight'] = merged_df['weight'].astype(long_float)
         if has_belief.sum() > 0:
             merged_df.loc[has_belief, 'weight'] = merged_df['belief'].apply(
                 func=_weight_from_belief)
         if has_no_belief.sum() > 0:
             merged_df.loc[has_no_belief, 'weight'] = \
                 merged_df['evidence_count'].apply(
-                    func=lambda ec: 1/np.longfloat(ec))
+                    func=lambda ec: 1/long_float(ec))
     else:
         logger.info('Skipping setting belief weight')
 
@@ -562,7 +568,10 @@ def sif_dump_df_to_digraph(
         If provided, must be or be path to a square dataframe with HGNC symbols
         as names on the axes and floats as entries
     corr_weight_type :
-        The type of weight to use for the edges. If 'z_score', use the
+        The type of weight to use for the edges. If 'z_score', use the z-score
+        values to calculate the weights, if 'logp', use the logp values.
+        Default: 'logp'. If 'z_score', the z-score values must be provided
+        in the dataframe or in the z_sc_path argument. Default: 'logp'.
     verbosity :
         Output various messages if > 0. For all messages, set to 4.
 
@@ -1084,9 +1093,9 @@ def ag_belief_score(belief_list):
     # Aggregate belief score: 1-prod(1-belief_i)
     with np.errstate(all='raise'):
         try:
-            ag_belief = np.longfloat(1.0) - np.prod(np.fromiter(map(
-                lambda belief: np.longfloat(1.0) - belief, belief_list),
-                dtype=np.longfloat)
+            ag_belief = long_float(1.0) - np.prod(np.fromiter(map(
+                lambda belief: long_float(1.0) - belief, belief_list),
+                dtype=long_float)
             )
         except FloatingPointError as err:
             logger.warning('%s: Resetting ag_belief to 10*np.longfloat '
