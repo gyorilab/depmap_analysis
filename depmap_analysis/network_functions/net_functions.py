@@ -19,8 +19,6 @@ from depmap_analysis.util.io_functions import file_opener
 from indra.assemblers.english import EnglishAssembler
 from indra.assemblers.indranet import IndraNet
 from indra.assemblers.indranet.net import default_sign_dict
-from indra.assemblers.pybel import PybelAssembler
-from indra.assemblers.pybel.assembler import belgraph_to_signed_graph
 from indra.belief import load_default_probs
 from indra.config import CONFIG_DICT
 from indra.databases import get_identifiers_url
@@ -876,6 +874,7 @@ def _custom_pb_assembly(stmts_list=None):
 
     # Assemble Pybel model
     logger.info('Assembling PyBEL model')
+    from indra.assemblers.pybel import PybelAssembler
     pb = PybelAssembler(stmts=filtered_stmts)
     pb_model = pb.make_model()
     return pb_model
@@ -942,6 +941,7 @@ def db_dump_to_pybel_sg(stmts_list=None, pybel_model=None, belief_dump=None,
 
     # Get a signed edge graph
     logger.info('Getting a PyBEL signed edge graph')
+    from indra.assemblers.pybel.assembler import belgraph_to_signed_graph
     pb_signed_edge_graph = belgraph_to_signed_graph(
         pb_model, symmetric_variant_links=True, symmetric_component_links=True,
         propagate_annotations=True
