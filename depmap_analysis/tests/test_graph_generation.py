@@ -21,12 +21,22 @@ bd = [0.685, 0.95]
 stmt_types = ['Activation', 'Complex']
 ev_counts = [7, 13]
 src = [{'srcA': 2, 'srcB': 5}, {'srcA': 5, 'srcB': 8}]
+logps = [-0.5, -1.5]
 
-sif_dict = {'agA_name': agA_names, 'agA_ns': agA_ns_list,
-            'agA_id': agA_ids, 'agB_name': agB_names, 'agB_ns': agB_ns_list,
-            'agB_id': agB_ids, 'stmt_type': stmt_types,
-            'evidence_count': ev_counts, 'stmt_hash': hashes,
-            'source_counts': src, 'belief': bd}
+sif_dict = {
+    'agA_name': agA_names,
+    'agA_ns': agA_ns_list,
+    'agA_id': agA_ids,
+    'agB_name': agB_names,
+    'agB_ns': agB_ns_list,
+    'agB_id': agB_ids,
+    'stmt_type': stmt_types,
+    'evidence_count': ev_counts,
+    'stmt_hash': hashes,
+    'source_counts': src,
+    'belief': bd,
+    'logp': logps
+}
 
 
 def _get_df():
@@ -234,14 +244,17 @@ def test_z_score_edges():
     idg: DiGraph = sif_dump_df_to_digraph(df=sif_df, date=date,
                                           graph_type='digraph',
                                           include_entity_hierarchies=False,
-                                          z_sc_path=m)
+                                          z_sc_path=m,
+                                          corr_weight_type='logp')
     edge1 = agA_names[0], agB_names[0]
     edge2 = agA_names[1], agB_names[1]
     assert 'weight' in idg.edges[edge1]
     assert 'weight' in idg.edges[edge2]
     assert 'belief' in idg.edges[edge1]
     assert 'belief' in idg.edges[edge2]
-    assert 'z_score' in idg.edges[edge1]
-    assert 'z_score' in idg.edges[edge2]
-    assert 'corr_weight' in idg.edges[edge1]
-    assert 'corr_weight' in idg.edges[edge2]
+    assert 'z_score' in idg.edges[edge1]['statements'][0]
+    assert 'z_score' in idg.edges[edge2]['statements'][0]
+    assert 'corr_weight' in idg.edges[edge1]['statements'][0]
+    assert 'corr_weight' in idg.edges[edge2]['statements'][0]
+    assert 'logp' in idg.edges[edge1]['statements'][0]
+    assert 'logp' in idg.edges[edge2]['statements'][0]
