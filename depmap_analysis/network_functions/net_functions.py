@@ -724,6 +724,9 @@ def sif_dump_df_to_digraph(
         verbosity=verbosity
     )
 
+    # Set position values that are NaN to None
+    sif_df['position'] = sif_df['position'].apply(lambda p: None if pd.isna(p) else p)
+
     # Map ns:id to node name
     logger.info('Creating dictionary mapping (ns,id) to node name')
     ns_id_name_tups = set(
