@@ -1,11 +1,15 @@
-import pandas as pd
-from networkx import DiGraph, MultiDiGraph
 from datetime import datetime
+from typing import Tuple
+
+import numpy as np
+import pandas as pd
+from networkx import DiGraph
+
 from depmap_analysis.network_functions.net_functions import \
     sif_dump_df_to_digraph
 
-
-__all__ = ['get_df', 'get_dg']
+__all__ = ['get_df', 'get_dg', '_gen_sym_df', '_get_off_diag_pair',
+           '_get_df_w_nan', '_get_raw_w_nan']
 
 
 def get_df() -> pd.DataFrame:
@@ -46,3 +50,92 @@ def get_dg() -> DiGraph:
                                           graph_type='digraph',
                                           include_entity_hierarchies=False)
     return idg
+
+
+def _gen_sym_df(size):
+    # Get square, symmetric matrix in dataframe
+    m = np.random.rand(size, size)
+    m = (m + m.T) / 2
+    np.fill_diagonal(m, 1.)
+    return pd.DataFrame(m)
+
+
+def _gen_raw_df(shape: Tuple[int, int]) -> pd.DataFrame:
+    # Get rectangular df with rows count > column count
+    rows = max(shape)
+    cols = min(shape)
+    return pd.DataFrame(np.random.rand(rows, cols))
+
+
+def _get_off_diag_pair(max_index: int):
+    if max_index == 0:
+        raise ValueError('Cannot have max_index == 0')
+    r = np.random.randint(0, max_index)
+    c = np.random.randint(0, max_index)
+    while r == c:
+        c = np.random.randint(0, max_index)
+    return r, c
+
+
+def _get_rect_pair(rows: int, cols: int) -> Tuple[int, int]:
+    if rows == 0 or cols == 0:
+        raise ValueError(f"Cannot have number of columns or rows == 0")
+    r = np.random.randint(0, rows)
+    c = np.random.randint(0, cols)
+    return r, c
+
+
+def _get_df_w_nan(size: int = 50,
+                  nan_count: int = 50) -> Tuple[pd.DataFrame, int]:
+    """Return symmetric dataframe with some NaNs"""
+    # Cannot remove more than a full off-diagonal triangle of the matrix
+    remove = min(nan_count, int((size**2 - size) / 2))
+    a = _gen_sym_df(size)
+
+    pairs = set()
+    n = 0
+    for n in range(remove):
+        k = 0
+        row, col = _get_off_diag_pair(size)
+        while (row, col) in pairs:
+            row, col = _get_off_diag_pair(size)
+            k += 1
+            if k > 1000:
+                print('Too many while iterations, breaking')
+                break
+        if k > 1000:
+            break
+        a.iloc[row, col] = np.nan
+        a.iloc[col, row] = np.nan
+        pairs.add((row, col))
+        pairs.add((col, row))
+
+    return a, n+1
+
+
+def _get_raw_w_nan(shape: Tuple[int, int] = (50, 10), nan_count: int = 50) -> \
+        Tuple[pd.DataFrame, int]:
+
+    a = _gen_raw_df(shape)
+    rows, cols = a.shape
+    remove = min(nan_count, max(shape))
+
+    # Set some numbers to nan
+    pairs = set()
+    n = 0
+    for n in range(remove):
+        row, col = _get_rect_pair(rows, cols)
+        k = 0
+        while (row, col) in pairs:
+            row, col = _get_rect_pair(rows, cols)
+            k += 1
+            if k > 1000:
+                print('Too many while iterations, breaking')
+                break
+        if k > 1000:
+            break
+        a.iloc[row, col] = np.nan
+        pairs.add((row, col))
+
+    return a, n+1
+

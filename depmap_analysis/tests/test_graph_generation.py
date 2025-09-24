@@ -1,10 +1,12 @@
-from networkx import DiGraph, MultiDiGraph
 from datetime import datetime
-from typing import Tuple
+
 import pandas as pd
-from indra.assemblers.indranet.net import default_sign_dict
+from networkx import DiGraph, MultiDiGraph
+
 from depmap_analysis.network_functions.net_functions import \
-    sif_dump_df_to_digraph, NP_PRECISION
+    sif_dump_df_to_digraph, MIN_WEIGHT
+from depmap_analysis.tests import _gen_sym_df
+from indra.assemblers.indranet.net import default_sign_dict
 
 # Add input
 agA_names = ['nameX1', 'nameX2']
@@ -71,8 +73,8 @@ def test_ontological_edges():
             assert sd['source_counts'] == {'fplx': 1}
             assert sd['belief'] == 1.0
             assert sd['curated']
-            assert sd['weight'] == NP_PRECISION, \
-                f'weight={sd["weight"]}, NP_PRECISION={NP_PRECISION}'
+            assert sd['weight'] == MIN_WEIGHT, \
+                f'weight={sd["weight"]}, MIN_WEIGHT={MIN_WEIGHT}'
             assert 'stmt_hash' in sd
             assert 'curated' in sd
             tested = True
@@ -218,3 +220,28 @@ def test_expanded_signed_graph_dump():
     assert sd['evidence_count'] == ev_counts[1]
     assert sd['source_counts'] == src[1]
     assert 'curated' in sd
+
+
+def test_z_score_edges():
+    # Get corr matrix
+    name_list = sorted(agA_names + agB_names)
+    m = 10 * _gen_sym_df(len(name_list))
+    m.columns = name_list
+    m.index = name_list
+
+    sif_df = _get_df()
+    date = datetime.utcnow().strftime('%Y-%m-%d')
+    idg: DiGraph = sif_dump_df_to_digraph(df=sif_df, date=date,
+                                          graph_type='digraph',
+                                          include_entity_hierarchies=False,
+                                          z_sc_path=m)
+    edge1 = agA_names[0], agB_names[0]
+    edge2 = agA_names[1], agB_names[1]
+    assert 'weight' in idg.edges[edge1]
+    assert 'weight' in idg.edges[edge2]
+    assert 'belief' in idg.edges[edge1]
+    assert 'belief' in idg.edges[edge2]
+    assert 'z_score' in idg.edges[edge1]
+    assert 'z_score' in idg.edges[edge2]
+    assert 'corr_weight' in idg.edges[edge1]
+    assert 'corr_weight' in idg.edges[edge2]
