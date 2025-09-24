@@ -159,10 +159,14 @@ def _weight_mapping(G, verbosity=0):
     Returns
     -------
     G : IndraNet
-        Graph with updated belief
+        Graph with updated belief weights and corr_weights
     """
     with np.errstate(all='raise'):
         for edge in G.edges:
+            # Correlation weight
+            _set_edge_corr_weight(G, edge)
+
+            # Belief weight
             try:
                 G.edges[edge]['weight'] = \
                     _weight_from_belief(G.edges[edge]['belief'])
@@ -744,6 +748,9 @@ def sif_dump_df_to_digraph(
         indranet_graph = IndraNet.digraph_from_df(sif_df,
                                                   'complementary_belief',
                                                   _weight_mapping)
+        # Flatten the corr_weight
+        for edge in indranet_graph.edges:
+            _set_edge_corr_weight(indranet_graph, edge)
     elif graph_type in ('signed', 'signed-expanded'):
         signed_edge_graph: MultiDiGraph = IndraNet.signed_from_df(
             df=sif_df, flattening_method='complementary_belief',
@@ -752,6 +759,12 @@ def sif_dump_df_to_digraph(
         signed_node_graph: DiGraph = signed_edges_to_signed_nodes(
             graph=signed_edge_graph, copy_edge_data=True
         )
+
+        # Flatten the corr_weight for the signed node graph
+        for edge in signed_node_graph.edges:
+            _set_edge_corr_weight(signed_node_graph, edge)
+
+        # Add graph attributes
         signed_edge_graph.graph['date'] = date
         signed_node_graph.graph['date'] = date
         signed_edge_graph.graph['node_by_ns_id'] = ns_id_to_nodename
