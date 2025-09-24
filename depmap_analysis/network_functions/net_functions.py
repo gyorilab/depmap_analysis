@@ -64,6 +64,11 @@ def _get_smallest_belief_prior():
                #[[v for v in def_probs['rand'].values() if v > 0]])
 
 
+def _close_enough(number: float, target: float, tol: float = 1e-4) -> bool:
+    # Check if number is close enough to target within tolerance tol
+    return abs(number - target) < tol
+
+
 MIN_BELIEF = _get_smallest_belief_prior()
 
 
@@ -103,6 +108,44 @@ def _weight_from_belief(belief):
     precision, return longfloat precision instead to avoid making the
     weight zero."""
     return float(max([MIN_WEIGHT, -np.log(belief)]))
+
+
+def _set_edge_corr_weight(G: DiGraph, edge: Tuple):
+    """Set the correlation weight of an edge in the graph G
+
+    Parameters
+    ----------
+    G : DiGraph
+        The graph containing the edge
+    edge : Tuple
+        The edge to set the correlation weight for
+    """
+    # Get all correlation weights for statements on this edge
+    corr_weights = [
+        sd['corr_weight'] for sd in G.edges[edge]['statements']
+        if pd.notna(sd.get('logp')) and 'corr_weight' in sd
+    ]
+    if len(corr_weights) > 0:
+        # Check that all correlation weights are close enough, just check the
+        # first one against the rest
+        first_corr = corr_weights[0]
+        if len(corr_weights) > 1 and not all(
+            _close_enough(cw, first_corr) for cw in corr_weights
+        ):
+            raise ValueError(
+                f"Edge {edge} has at least two correlation weights that are not "
+                f"similar enough: {corr_weights}"
+            )
+        G.edges[edge]['corr_weight'] = first_corr
+    else:
+        G.edges[edge]['corr_weight'] = 1.0
+
+    # Now delete corr_weight and logp from the statements to save space
+    for sd in G.edges[edge]['statements']:
+        if 'corr_weight' in sd:
+            del sd['corr_weight']
+        if 'logp' in sd:
+            del sd['logp']
 
 
 def _weight_mapping(G, verbosity=0):
