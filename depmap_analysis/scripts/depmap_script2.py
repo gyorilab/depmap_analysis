@@ -319,6 +319,7 @@ def match_correlations(corr_z: pd.DataFrame,
     depmap_date = depmap_date or ymd_now
     tstart = time()
 
+
     # Set args for _match_correlation_body
     match_args = (
         expl_types,
@@ -405,10 +406,14 @@ def match_correlations(corr_z: pd.DataFrame,
                 f'{len(output_list)} results')
     for stats_dict, expl_dict in output_list:
         explainer.stats_df = pd.concat(
-            [explainer.stats_df, pd.DataFrame(data=stats_dict)]
+            [explainer.stats_df, pd.DataFrame(data=stats_dict)],
+            ignore_index=True
         )
-        explainer.expl_df = explainer.expl_df.append(other=pd.DataFrame(
-            data=expl_dict))
+        explainer.expl_df = pd.concat(
+            [explainer.expl_df, pd.DataFrame(data=expl_dict)],
+            ignore_index=True
+        )
+
 
     return explainer
 
