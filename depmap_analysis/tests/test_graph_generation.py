@@ -22,6 +22,8 @@ stmt_types = ['Activation', 'Complex']
 ev_counts = [7, 13]
 src = [{'srcA': 2, 'srcB': 5}, {'srcA': 5, 'srcB': 8}]
 logps = [-0.5, -1.5]
+positions = [0, None]
+residues = ["T", None]
 
 sif_dict = {
     'agA_name': agA_names,
@@ -35,7 +37,9 @@ sif_dict = {
     'stmt_hash': hashes,
     'source_counts': src,
     'belief': bd,
-    'logp': logps
+    'logp': logps,
+    'position': positions,
+    'residue': residues,
 }
 
 
@@ -252,9 +256,10 @@ def test_z_score_edges():
     assert 'weight' in idg.edges[edge2]
     assert 'belief' in idg.edges[edge1]
     assert 'belief' in idg.edges[edge2]
+    assert 'corr_weight' in idg.edges[edge1]
+    assert 'corr_weight' in idg.edges[edge2]
     assert 'z_score' in idg.edges[edge1]['statements'][0]
     assert 'z_score' in idg.edges[edge2]['statements'][0]
-    assert 'corr_weight' in idg.edges[edge1]['statements'][0]
-    assert 'corr_weight' in idg.edges[edge2]['statements'][0]
-    assert 'logp' in idg.edges[edge1]['statements'][0]
-    assert 'logp' in idg.edges[edge2]['statements'][0]
+    # logp is removed from the statements dict when flattening the sif df to a DiGraph
+    assert 'logp' not in idg.edges[edge1]['statements'][0]
+    assert 'logp' not in idg.edges[edge2]['statements'][0]
