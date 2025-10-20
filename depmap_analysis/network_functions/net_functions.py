@@ -4,14 +4,8 @@ from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from itertools import cycle
-from typing import Tuple, Union, Dict, Optional, List
-
-try:
-    # Py 3.8+
-    from typing import Literal
-except ImportError:
-    # Py 3.7-
-    from typing_extensions import Literal
+from typing import Tuple, Union, Dict, Optional, List, Literal
+from scipy.special import ndtri_exp
 
 import numpy as np
 import pandas as pd
@@ -25,8 +19,6 @@ from depmap_analysis.util.io_functions import file_opener
 from indra.assemblers.english import EnglishAssembler
 from indra.assemblers.indranet import IndraNet
 from indra.assemblers.indranet.net import default_sign_dict
-from indra.assemblers.pybel import PybelAssembler
-from indra.assemblers.pybel.assembler import belgraph_to_signed_graph
 from indra.belief import load_default_probs
 from indra.config import CONFIG_DICT
 from indra.databases import get_identifiers_url
@@ -38,8 +30,14 @@ from indra.statements import Agent, get_statement_by_name, get_all_descendants
 
 logger = logging.getLogger(__name__)
 
-NP_PRECISION = 10 ** -np.finfo(np.longfloat).precision  # Numpy precision
-MIN_WEIGHT = np.longfloat(1e-12)  # Set min weight to 10x precision
+try:
+    # numpy < 2
+    long_float = np.longfloat
+except AttributeError:
+    # numpy >= 2
+    long_float = np.longdouble
+NP_PRECISION = 10 ** -np.finfo(long_float).precision  # Numpy precision
+MIN_WEIGHT = long_float(1e-12)  # Set min weight to 10x precision
 INT_PLUS = 0
 INT_MINUS = 1
 SIGN_TO_STANDARD = {INT_PLUS: '+', '+': '+', 'plus': '+',
@@ -64,6 +62,11 @@ def _get_smallest_belief_prior():
     def_probs = load_default_probs()
     return min([v for v in def_probs['syst'].values() if v > 0])# +
                #[[v for v in def_probs['rand'].values() if v > 0]])
+
+
+def _close_enough(number: float, target: float, tol: float = 1e-4) -> bool:
+    # Check if number is close enough to target within tolerance tol
+    return abs(number - target) < tol
 
 
 MIN_BELIEF = _get_smallest_belief_prior()
@@ -107,6 +110,44 @@ def _weight_from_belief(belief):
     return float(max([MIN_WEIGHT, -np.log(belief)]))
 
 
+def _set_edge_corr_weight(G: DiGraph, edge: Tuple):
+    """Set the correlation weight of an edge in the graph G
+
+    Parameters
+    ----------
+    G : DiGraph
+        The graph containing the edge
+    edge : Tuple
+        The edge to set the correlation weight for
+    """
+    # Get all correlation weights for statements on this edge
+    corr_weights = [
+        sd['corr_weight'] for sd in G.edges[edge]['statements']
+        if pd.notna(sd.get('logp')) and 'corr_weight' in sd
+    ]
+    if len(corr_weights) > 0:
+        # Check that all correlation weights are close enough, just check the
+        # first one against the rest
+        first_corr = corr_weights[0]
+        if len(corr_weights) > 1 and not all(
+            _close_enough(cw, first_corr) for cw in corr_weights
+        ):
+            raise ValueError(
+                f"Edge {edge} has at least two correlation weights that are not "
+                f"similar enough: {corr_weights}"
+            )
+        G.edges[edge]['corr_weight'] = first_corr
+    else:
+        G.edges[edge]['corr_weight'] = 1.0
+
+    # Now delete corr_weight and logp from the statements to save space
+    for sd in G.edges[edge]['statements']:
+        if 'corr_weight' in sd:
+            del sd['corr_weight']
+        if 'logp' in sd:
+            del sd['logp']
+
+
 def _weight_mapping(G, verbosity=0):
     """Mapping function for adding the weight of the flattened edges
 
@@ -118,10 +159,14 @@ def _weight_mapping(G, verbosity=0):
     Returns
     -------
     G : IndraNet
-        Graph with updated belief
+        Graph with updated belief weights and corr_weights
     """
     with np.errstate(all='raise'):
         for edge in G.edges:
+            # Correlation weight
+            _set_edge_corr_weight(G, edge)
+
+            # Belief weight
             try:
                 G.edges[edge]['weight'] = \
                     _weight_from_belief(G.edges[edge]['belief'])
@@ -251,7 +296,7 @@ def sif_dump_df_merger(df: pd.DataFrame,
                        sign_dict: Optional[Dict[str, int]] = None,
                        stmt_types: Optional[List[str]] = None,
                        mesh_id_dict: Optional[Dict[str, str]] = None,
-                       set_weights: bool = True,
+                       set_belief_weight: bool = True,
                        verbosity: int = 0):
     """Merge the sif dump df with the provided dictionaries
 
@@ -276,7 +321,7 @@ def sif_dump_df_merger(df: pd.DataFrame,
     mesh_id_dict : dict
         A dict object mapping statement hashes to all mesh ids sharing a
         common PMID
-    set_weights : bool
+    set_belief_weight : bool
         If True, set the edge weights. Default: True.
     verbosity : int
         Output various extra messages if > 1.
@@ -340,28 +385,32 @@ def sif_dump_df_merger(df: pd.DataFrame,
     # Make english statement
     merged_df['english'] = merged_df.apply(_english_from_row, axis=1)
 
-    if set_weights:
-        logger.info('Setting edge weights')
+    if set_belief_weight:
+        logger.info('Setting edge belief weights')
         # Add weight: -log(belief) or 1/evidence count if no belief
         has_belief = (merged_df['belief'].isna() == False)
         has_no_belief = (merged_df['belief'].isna() == True)
         merged_df['weight'] = 0
+        merged_df['weight'] = merged_df['weight'].astype(long_float)
         if has_belief.sum() > 0:
             merged_df.loc[has_belief, 'weight'] = merged_df['belief'].apply(
                 func=_weight_from_belief)
         if has_no_belief.sum() > 0:
             merged_df.loc[has_no_belief, 'weight'] = \
                 merged_df['evidence_count'].apply(
-                    func=lambda ec: 1/np.longfloat(ec))
+                    func=lambda ec: 1/long_float(ec))
     else:
         logger.info('Skipping setting belief weight')
 
     return merged_df
 
 
-def add_corr_to_edges(graph: DiGraph, z_corr: pd.DataFrame,
-                      self_corr_value: Optional[float] = None):
-    """Add z-score and associated weight to graph edges
+def add_corr_to_edges(
+    graph: DiGraph,
+    z_corr: pd.DataFrame,
+    self_corr_value: Optional[float] = None
+):
+    """Add z-scores to graph edges
 
     Parameters
     ----------
@@ -373,7 +422,7 @@ def add_corr_to_edges(graph: DiGraph, z_corr: pd.DataFrame,
         If provided, set this value as self corr value. Default: value of
         first non-NaN value on the diagonal.
     """
-    logger.info('Setting z-scores and z-score weights to graph edges')
+    logger.info('Adding z-scores to graph edges')
     self_corr = None
     if self_corr_value is not None:
         self_corr = self_corr_value
@@ -386,19 +435,14 @@ def add_corr_to_edges(graph: DiGraph, z_corr: pd.DataFrame,
         raise ValueError('Provide a value for self correlation or a z-score '
                          'dataframe with self correlations')
     non_z_score = 0
-    non_corr_weight = round(
-        z_sc_weight(z_score=non_z_score, self_corr=self_corr), 4
-    )
     for u, v, data in tqdm(graph.edges(data=True)):
         un = u[0] if isinstance(u, tuple) else u
         vn = v[0] if isinstance(v, tuple) else v
         if un in z_corr and vn in z_corr and not np.isnan(z_corr.loc[un, vn]):
             z_sc = z_corr.loc[un, vn]
             data['z_score'] = round(z_sc, 4)
-            data['corr_weight'] = round(z_sc_weight(z_sc, self_corr), 4)
         else:
             data['z_score'] = non_z_score
-            data['corr_weight'] = non_corr_weight
 
     logger.info('Performing sanity checks')
     assert all('corr_weight' in graph.edges[e] and 'z_score' in graph.edges[e]
@@ -466,6 +510,34 @@ def z_sc_weight_df(df: pd.DataFrame, self_corr: float) -> pd.Series:
     return out_series
 
 
+def logp_weight(logp: float, scale: float, sigfig: int = 4) -> float:
+    """Calculate the corresponding weight of a given logp value
+
+    The weight is calculated as:
+    (scale - 0.9 * abs(logp)) / scale
+
+    Setting scale to max(abs(logp)) will result in a weight of 1 for
+    logp == 0, and a weight of 0.1 for logp == scale.
+
+    Parameters
+    ----------
+    logp :
+        The logp to calculate the weight of
+    scale :
+        A float to scale the logp value with.
+    sigfig :
+        The number of decimal places to round the weight to. Default: 4.
+
+    Returns
+    -------
+    :
+        A weight value calculated as
+    """
+    if pd.isna(logp) or np.isinf(logp):
+        return 1.0
+    return round((scale - 0.9 * abs(logp)) / scale, sigfig)
+
+
 def z_sc_weight(z_score: float, self_corr: float) -> float:
     """Calculate the corresponding weight of a given z-score
 
@@ -484,29 +556,31 @@ def z_sc_weight(z_score: float, self_corr: float) -> float:
         The difference between self_corr and the absolute value of the
         z-score normalized, unless z_score == self_corr, then return 1
     """
-    if self_corr == z_score:
-        return 1
+    if pd.isna(z_score) or np.isinf(z_score) or self_corr == z_score:
+        return 1.0
     return (self_corr - abs(z_score)) / self_corr
 
 
-def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
-                           date: str,
-                           mesh_id_dict: Optional[Dict] = None,
-                           graph_type: GraphTypes = 'digraph',
-                           include_entity_hierarchies: bool = True,
-                           sign_dict: Optional[Dict[str, int]] = None,
-                           stmt_types: Optional[List[str]] = None,
-                           z_sc_path: Optional[Union[str, pd.DataFrame]] = None,
-                           verbosity: int = 0) \
-        -> Union[DiGraph, MultiDiGraph, Tuple[MultiDiGraph, DiGraph]]:
-    """Return a NetworkX digraph from a pandas dataframe of a db dump
+def sif_dump_df_to_digraph(
+    df: Union[pd.DataFrame, str],
+    date: str = None,
+    graph_type: GraphTypes = 'digraph',
+    include_entity_hierarchies: bool = True,
+    sign_dict: Optional[Dict[str, int]] = None,
+    stmt_types: Optional[List[str]] = None,
+    mesh_id_dict: Optional[Dict[str, str]] = None,
+    z_sc_path: Optional[Union[str, pd.DataFrame]] = None,
+    corr_weight_type: Literal['z_score', 'logp'] = 'logp',
+    verbosity: int = 0
+) -> Union[DiGraph, MultiDiGraph, Tuple[MultiDiGraph, DiGraph]]:
+    """Return a NetworkX digraph from a pandas dataframe of a db dump as a sif df
 
     Parameters
     ----------
-    df : Union[str, pd.DataFrame]
+    df :
         A dataframe, either as a file path to a file (.pkl or .csv) or a
         pandas DataFrame object.
-    date : str
+    date :
         A date string specifying when the data was dumped from the database.
     mesh_id_dict : dict
         A dict object mapping statement hashes to all mesh ids sharing a
@@ -517,31 +591,39 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
             - 'multidigraph': MultiDiGraph
             - 'signed': Tuple[DiGraph, MultiDiGraph]
             - 'signed-expanded': Tuple[DiGraph, MultiDiGraph]
-            - 'digraph-signed-types':  DiGraph
+            - 'digraph-signed-types': DiGraph
     include_entity_hierarchies : bool
         If True, add edges between nodes if they are related ontologically
         with stmt type 'fplx': e.g. BRCA1 is in the BRCA family, so an edge
         is added between the nodes BRCA and BRCA1. Default: True. Note that
         this option only is available for the options directed/unsigned graph
         and multidigraph.
-    sign_dict : Dict[str, int]
+    sign_dict :
         A dictionary mapping a Statement type to a sign to be used for the
         edge. By default only Activation and IncreaseAmount are added as
         positive edges and Inhibition and DecreaseAmount are added as
         negative edges, but a user can pass any other Statement types in a
         dictionary.
-    stmt_types : List[str]
+    stmt_types :
         A list of statement types to epxand out to other signs
-    z_sc_path:
+    mesh_id_dict :
+        A dict object mapping statement hashes to all mesh ids sharing a
+        common PMID. If None, no mesh ids are added.
+    z_sc_path :
         If provided, must be or be path to a square dataframe with HGNC symbols
         as names on the axes and floats as entries
-    verbosity: int
+    corr_weight_type :
+        The type of weight to use for the edges. If 'z_score', use the z-score
+        values to calculate the weights, if 'logp', use the logp values.
+        Default: 'logp'. If 'z_score', the z-score values must be provided
+        in the dataframe or in the z_sc_path argument. Default: 'logp'.
+    verbosity :
         Output various messages if > 0. For all messages, set to 4.
 
     Returns
     -------
-    Union[DiGraph, MultiDiGraph, Tuple[DiGraph, MultiDiGraph]]
-        The type is determined by the graph_type argument
+    :
+        A networkx graph of The graph type is determined by the graph_type argument
     """
     graph_options = ('digraph', 'multidigraph', 'signed', 'signed-expanded',
                      'digraph-signed-types')
@@ -562,7 +644,7 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
         if isinstance(z_sc_path, str):
             if z_sc_path.endswith('h5'):
                 logger.info(f'Loading z-scores from {z_sc_path}')
-                z_sc_df = pd.read_hdf(z_sc_path)
+                z_sc_df: pd.DataFrame = pd.read_hdf(z_sc_path)
             elif z_sc_path.endswith('pkl'):
                 logger.info(f'Loading z-scores from {z_sc_path}')
                 z_sc_df: pd.DataFrame = file_opener(z_sc_path)
@@ -576,12 +658,74 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
     else:
         z_sc_df = None
 
+    # Set z-scores and corr_weights
+
+    # Calculate z-scores from logp values if the sign is available
+    if z_sc_df is None and 'logp' in sif_df.columns and "sign" in sif_df.columns:
+        logger.info('Calculating z-scores from logp values')
+
+        # Set z-score and corr_weight attributes
+        def _logp_z_sc(row) -> float:
+            if row["logp"] is None or np.isnan(row["logp"]):
+                return 0.0
+            return abs(ndtri_exp(row["logp"] - np.log(2))) * row["sign"]
+        sif_df["z_score"] = sif_df.apply(_logp_z_sc, axis=1)
+
+    # Otherwise, if z_sc_df is provided, set the z_score and corr_weight
+    elif z_sc_df is not None:
+        logger.info('Setting z-scores from provided z-score dataframe')
+        # Get correlations
+        z_corr_pairs = get_corrs(z_sc_df, sif_df)
+        # Add to sif_df, set the missing values to 0
+        sif_df = sif_df.merge(z_corr_pairs, how='left',
+                              on=['agA_name', 'agB_name'])
+        sif_df['z_score'] = sif_df['z_score'].fillna(0.0)
+    else:
+        logger.info("No way to get z-score values: log-p values and signs are "
+                    "missing from sif dataframe or z-score dataframe not "
+                    "provided.")
+
+    # Set corr_weight based on z_score or logp
+    if corr_weight_type == "z_score" and "z_score" in sif_df.columns:
+        logger.info("Setting corr_weight based on z_score")
+        if z_sc_df is not None:
+            self_corr = z_sc_df.iloc[0, 0]
+            if pd.isna(self_corr) or np.isinf(self_corr):
+                logger.warning(
+                    "Self correlation value is NaN or inf in z-score dataframe. "
+                    "Using max(abs(z-score)) value instead to scale corr_weight."
+                )
+                self_corr = z_sc_df.max().max() * 1.1
+        else:
+            self_corr = sif_df["z_score"].abs().max() * 1.1
+        sif_df["corr_weight"] = sif_df["z_score"].apply(z_sc_weight, self_corr=self_corr)
+
+    elif corr_weight_type == "logp" and "logp" in sif_df.columns:
+        logger.info('Setting corr_weight based on logp values')
+        scale = sif_df[sif_df["logp"] > -np.inf]["logp"].abs().max()
+        sif_df["corr_weight"] = sif_df["logp"].apply(logp_weight, scale=scale)
+
+    else:
+        logger.warning(
+            "Need to have either z_score or logp values in the dataframe to set "
+            "corr_weight. Skipping setting corr_weight."
+        )
+
     # If signed types: filter out rows that of unsigned types
     if graph_type == 'digraph-signed-types':
         sif_df = sif_df[sif_df.stmt_type.isin(sign_dict.keys())]
 
-    sif_df = sif_dump_df_merger(sif_df, graph_type, sign_dict, stmt_types,
-                                mesh_id_dict, verbosity=verbosity)
+    sif_df = sif_dump_df_merger(
+        sif_df,
+        graph_type,
+        sign_dict,
+        stmt_types,
+        mesh_id_dict=mesh_id_dict,
+        verbosity=verbosity
+    )
+
+    # Set position values that are NaN to None
+    sif_df['position'] = sif_df['position'].apply(lambda p: None if pd.isna(p) else p)
 
     # Map ns:id to node name
     logger.info('Creating dictionary mapping (ns,id) to node name')
@@ -607,6 +751,9 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
         indranet_graph = IndraNet.digraph_from_df(sif_df,
                                                   'complementary_belief',
                                                   _weight_mapping)
+        # Flatten the corr_weight
+        for edge in indranet_graph.edges:
+            _set_edge_corr_weight(indranet_graph, edge)
     elif graph_type in ('signed', 'signed-expanded'):
         signed_edge_graph: MultiDiGraph = IndraNet.signed_from_df(
             df=sif_df, flattening_method='complementary_belief',
@@ -615,6 +762,12 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
         signed_node_graph: DiGraph = signed_edges_to_signed_nodes(
             graph=signed_edge_graph, copy_edge_data=True
         )
+
+        # Flatten the corr_weight for the signed node graph
+        for edge in signed_node_graph.edges:
+            _set_edge_corr_weight(signed_node_graph, edge)
+
+        # Add graph attributes
         signed_edge_graph.graph['date'] = date
         signed_node_graph.graph['date'] = date
         signed_edge_graph.graph['node_by_ns_id'] = ns_id_to_nodename
@@ -640,19 +793,10 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
                 else:
                     sng_hash_edge_dict[es['stmt_hash']].add(edge)
         signed_node_graph.graph['edge_by_hash'] = sng_hash_edge_dict
-        if z_sc_df is not None:
-            # Set z-score attributes
-            add_corr_to_edges(graph=signed_edge_graph, z_corr=z_sc_df)
-            add_corr_to_edges(graph=signed_node_graph, z_corr=z_sc_df)
-
         return signed_edge_graph, signed_node_graph
     else:
         raise ValueError(f'Unrecognized graph type {graph_type}. Must be one '
                          f'of: {", ".join(graph_options)}')
-
-    if z_sc_df is not None:
-        # Set z-score attributes
-        add_corr_to_edges(graph=indranet_graph, z_corr=z_sc_df)
 
     # Add hierarchy relations to graph (not applicable for signed graphs)
     if include_entity_hierarchies and graph_type in ('multidigraph',
@@ -674,9 +818,19 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
                     non_corr_weight = indranet_graph.edges[edge]['corr_weight']
                     break
             assert non_corr_weight is not None
-            z_sc_attrs = {'z_score': 0, 'corr_weight': non_corr_weight}
+            z_sc_attrs = {'z_score': 0, 'corr_weight': non_corr_weight, "logp": 0}
         else:
             z_sc_attrs = {}
+
+        # Edge dict
+        default_edge_dict = {
+            "stmt_type": "fplx",
+            "evidence_count": 1,
+            "source_counts": {"fplx": 1},
+            "belief": 1.0,
+            "weight": MIN_WEIGHT,
+            "curated": True,
+        }
 
         for ns, _id, uri in full_entity_list:
             node = _id
@@ -699,15 +853,17 @@ def sif_dump_df_to_digraph(df: Union[pd.DataFrame, str],
                     entities += 1
                     # Belief and evidence are conditional
                     added_pairs.add((node, pnode, puri))  # A, B, uri of B
-                    ed = {'agA_name': node, 'agA_ns': ns, 'agA_id': _id,
-                          'agB_name': pnode, 'agB_ns': pns, 'agB_id': pid,
-                          'stmt_type': 'fplx', 'evidence_count': 1,
-                          'source_counts': {'fplx': 1}, 'stmt_hash': puri,
-                          'belief': 1.0, 'weight': MIN_WEIGHT,
-                          'curated': True,
-                          'english': f'{pns}:{pid} is an ontological parent '
-                                     f'of {ns}:{_id}',
-                          'z_score': 0, 'corr_weight': 1}
+                    ed = {
+                        **default_edge_dict,
+                        "agA_name": node,
+                        "agA_ns": ns,
+                        "agA_id": _id,
+                        "agB_name": pnode,
+                        "agB_ns": pns,
+                        "agB_id": pid,
+                        "stmt_hash": puri,
+                        "english": f"{pns}:{pid} is an ontological parent of {ns}:{_id}",
+                    }
                     # Add non-existing nodes
                     if ed['agA_name'] not in indranet_graph.nodes:
                         indranet_graph.add_node(ed['agA_name'],
@@ -777,6 +933,7 @@ def _custom_pb_assembly(stmts_list=None):
 
     # Assemble Pybel model
     logger.info('Assembling PyBEL model')
+    from indra.assemblers.pybel import PybelAssembler
     pb = PybelAssembler(stmts=filtered_stmts)
     pb_model = pb.make_model()
     return pb_model
@@ -843,6 +1000,7 @@ def db_dump_to_pybel_sg(stmts_list=None, pybel_model=None, belief_dump=None,
 
     # Get a signed edge graph
     logger.info('Getting a PyBEL signed edge graph')
+    from indra.assemblers.pybel.assembler import belgraph_to_signed_graph
     pb_signed_edge_graph = belgraph_to_signed_graph(
         pb_model, symmetric_variant_links=True, symmetric_component_links=True,
         propagate_annotations=True
@@ -994,9 +1152,9 @@ def ag_belief_score(belief_list):
     # Aggregate belief score: 1-prod(1-belief_i)
     with np.errstate(all='raise'):
         try:
-            ag_belief = np.longfloat(1.0) - np.prod(np.fromiter(map(
-                lambda belief: np.longfloat(1.0) - belief, belief_list),
-                dtype=np.longfloat)
+            ag_belief = long_float(1.0) - np.prod(np.fromiter(map(
+                lambda belief: long_float(1.0) - belief, belief_list),
+                dtype=long_float)
             )
         except FloatingPointError as err:
             logger.warning('%s: Resetting ag_belief to 10*np.longfloat '

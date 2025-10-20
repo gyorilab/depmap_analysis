@@ -31,13 +31,16 @@ def get_df() -> pd.DataFrame:
            {'srcA': 5, 'srcB': 8},
            {'srcA': 2, 'srcB': 5}, {'srcA': 5, 'srcB': 8},
            {'srcA': 5, 'srcB': 8}]
+    positions = [None, None, None, 123, None, None]
+    residues = [None, None, None, 'S', None, None]
 
     sif_dict = {'agA_name': agA_names, 'agA_ns': agA_ns_list,
                 'agA_id': agA_ids, 'agB_name': agB_names,
                 'agB_ns': agB_ns_list,
                 'agB_id': agB_ids, 'stmt_type': stmt_types,
                 'evidence_count': ev_counts, 'stmt_hash': hashes,
-                'source_counts': src, 'belief': bd}
+                'source_counts': src, 'belief': bd,
+                'position': positions, 'residue': residues}
 
     sif_df = pd.DataFrame(sif_dict)
     return sif_df
